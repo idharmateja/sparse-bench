@@ -1,10 +1,10 @@
 # sparse-bench
-Benchmarks for sparse operations on GPU.
+Benchmarks for sparse operations.
 
 # Compilation
-nvcc -w main.cu -lcusparse
+make all
 
 # Execution
-./a.out \<M\> \<K\> \<N\> \<sparsity in A\>
+./cpusdmm \<M\> \<K\> \<N\> \<sparsity in A\>
 
 Note: Range of sparsity is [0,1]
