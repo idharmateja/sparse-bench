@@ -253,6 +253,94 @@ csr_matrix get_csr_matrix_gpu_handle(csr_matrix h_mat){
 	return d_mat;	
 }
 
+
+void cublas_benchmark(float* A, bool is_A_rowmajor, 
+					float* B, bool is_B_rowmajor, 
+					int M, int K, int N, 
+					float* C, bool is_C_rowmajor, 
+					float &runtime, int num_iters){
+	cublasStatus_t status;
+	cublasHandle_t handle;
+
+	float alpha = 1.0f;
+	float beta = 0.0f;
+
+	status = cublasCreate(&handle);
+
+	if (status != CUBLAS_STATUS_SUCCESS)
+	{
+		fprintf(stderr, "!!!! CUBLAS initialization error\n");
+		exit(EXIT_FAILURE);
+	}
+
+	float* h_A, *h_B;
+	float* d_A, *d_B, *d_C;
+
+	if(is_A_rowmajor){
+		h_A = new float[M * K]();
+		memcpy(h_A, A, (M * K * sizeof(float))) ;
+		swap_memory_layout(h_A, M, K, true);
+	}else{
+		h_A = A;
+	}
+
+	if(is_B_rowmajor){
+		h_B = new float[K * N]();
+		memcpy(h_B, B, (K * N * sizeof(float)) );
+		swap_memory_layout(h_B, K, N, true);
+	}else{
+		h_B = B;
+	}
+
+	gpuErrchk(cudaMalloc((void**)&d_A, (M * K * sizeof(float))));
+	gpuErrchk(cudaMalloc((void**)&d_B, (K * N * sizeof(float))));
+	gpuErrchk(cudaMalloc((void**)&d_C, (M * N * sizeof(float))));
+
+	gpuErrchk(cudaMemcpy(d_A, h_A, (M * K * sizeof(float)), cudaMemcpyHostToDevice));
+	gpuErrchk(cudaMemcpy(d_B, h_B, (K * N * sizeof(float)), cudaMemcpyHostToDevice));
+
+	float cum_runtime = 0;
+	for (int iter_id = 0; iter_id < num_iters; ++iter_id)
+	{
+		float elapased_time = 0;
+
+		cudaEvent_t start, stop;
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+
+		cudaEventRecord(start);
+		status = cublasSgemm(handle, 
+					CUBLAS_OP_N, CUBLAS_OP_N, 
+					M, N, K,
+					&alpha, 
+					d_A, M,
+					d_B, K,
+					&beta, 
+					d_C, M);
+		cudaEventRecord(stop);
+
+		cudaEventSynchronize(stop);
+		cudaEventElapsedTime(&elapased_time, start, stop);
+
+		cum_runtime += elapased_time;
+	}
+	// Averaging run times.
+	runtime = cum_runtime/num_iters;
+
+	if (status != CUBLAS_STATUS_SUCCESS)
+	{
+		fprintf(stderr, "cuBLAS call failed with code : %d\n", status);
+		exit(EXIT_FAILURE);
+	}
+
+	// Copying the result back
+	gpuErrchk(cudaMemcpy(C, d_C, (M * N * sizeof(float)), cudaMemcpyDeviceToHost));
+
+	if(is_C_rowmajor){
+		swap_memory_layout(C, M, N, false);
+	}
+}
+
 // cusparse benchmark for spxdense mutliplication
 void cusparse_benchmark(csr_matrix csr_mat,
 					float* B, bool is_B_rowmajor, 
@@ -366,8 +454,9 @@ int main(int argc, char const *argv[])
 {
 	int M,K,N;
 	float sp_a;
-	bool is_uniform = false;
+	bool is_uniform = true;
 	int NUM_ITERS = 10;
+	bool profile = true;
 
 	M = atoi(argv[1]);
 	K = atoi(argv[2]);
@@ -375,11 +464,14 @@ int main(int argc, char const *argv[])
 
 	sp_a = atof(argv[4]);
 
+	if(argc >= 6)
+		profile = atoi(argv[5]);
+
 	// Generating sparse datastructures
 	csr_matrix A_csr = generate_sparse_matrix(M, K, sp_a, is_uniform);
-	dense_matrix B_mat = generate_dense_matrix(K, N, false);
+	dense_matrix B_mat = generate_dense_matrix(K, N, true);
 
-	dense_matrix C_mat = generate_dense_matrix(M, N, false);
+	dense_matrix C_mat = generate_dense_matrix(M, N, true);
 	for (int i = 0; i < C_mat.rows*C_mat.cols; ++i) C_mat.values[i] = 0;
 
 
@@ -389,10 +481,32 @@ int main(int argc, char const *argv[])
 					B_mat.values, B_mat.is_rowmajor,
 					M, K, N,
 					C_mat.values, C_mat.is_rowmajor,
-					false,
+					true,
 					cusparse_time, NUM_ITERS);
 
+	//std::cout << A_csr.nnz << std::endl;
 
+	// Dense matrix multiplication call
+	float cublas_time = 0;
+	dense_matrix A_mat = convert_csr_to_dense(A_csr, true);
+	dense_matrix C_mat_ref = generate_dense_matrix(M, N, true);
+
+	for (int i = 0; i < C_mat.rows*C_mat.cols; ++i) C_mat_ref.values[i] = 0;
+	cublas_benchmark(A_mat.values, A_mat.is_rowmajor,
+					B_mat.values, B_mat.is_rowmajor,
+					M, K, N, 
+					C_mat_ref.values, C_mat_ref.is_rowmajor,
+					cublas_time, NUM_ITERS);
+
+	float error = 0;
+	for (int i = 0; i < C_mat.rows*C_mat.cols; ++i)
+	{
+		error += abs(C_mat.values[i] - C_mat_ref.values[i]);
+	}
+
+	assert(error == 0);
+
+	/*
 	// VERIFICATION
 	dense_matrix C_ref_mat = generate_dense_matrix(M, N, C_mat.is_rowmajor);
 	for (int i = 0; i < C_ref_mat.rows*C_ref_mat.cols; ++i) C_ref_mat.values[i] = 0;
@@ -420,16 +534,23 @@ int main(int argc, char const *argv[])
 		}
 	}
 
-	float error = 0;
 	for (int i = 0; i < C_mat.rows*C_mat.cols; ++i)
 	{
 		error += abs(C_mat.values[i] - C_ref_mat.values[i]);
 	}
 
-	// Timing information.
-	std::cout << "Error :  " << error << std::endl;
-	std::cout << "Time(ms): " << cusparse_time << std::endl;
-	
+	assert(error == 0);
+	*/
+	if(profile){
+		std::cout << cusparse_time << ",";
+		//std::cout << cublas_time << ",";
+	}else{
+		// Timing information.
+		std::cout << "Error :  " << error << std::endl;
+		std::cout << "sparse Time(ms): " << cusparse_time << std::endl;
+		std::cout << "dense  TIme(ms): " << cublas_time << std::endl;
+		std::cout << "Speedup: " << cublas_time/cusparse_time << std::endl;
+	}
 
 	return 0;
 }
