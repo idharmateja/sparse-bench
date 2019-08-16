@@ -2,9 +2,13 @@
 Benchmarks for sparse operations.
 
 # Compilation
-make all
+make
 
 # Execution
-./cpusdmm \<M\> \<K\> \<N\> \<sparsity in A\>
+./cpusdmm 
 
-Note: Range of sparsity is [0,1]
+Note : 
+1. Update matrix sizes and sparsity in the main.cpp #define definitions. 
+2. For bigger matrix sizes, update the stack limit.
+3. If you want to debug the code, then add -FDEBUG to CFLAGS in makefile. 
+
