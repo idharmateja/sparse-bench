@@ -7,6 +7,7 @@
 #include <iostream>
 #include <iomanip>
 
+#ifdef FDEBUG
 
 typedef struct  dense_matrix
 {
@@ -26,7 +27,6 @@ typedef struct  csr_matrix
 	int* rowPtr; // [i] contains index of first element in row 'i'
 }csr_matrix;
 
-#ifdef FDEBUG
 // Conversions between sparse matrix formats
 dense_matrix convert_csr_to_dense(csr_matrix csr_mat, bool in_rowmajor){
 	// Initialize and allocate memory for dense matrix.
@@ -98,9 +98,8 @@ void print_csr_matrix(csr_matrix csr_mat){
 
 	delete[] dense_mat.values;
 }
+
 #endif
-
-
 
 #define M_ 6
 #define K_ M_
@@ -109,20 +108,15 @@ void print_csr_matrix(csr_matrix csr_mat){
 #define NNZ_ int(M_*N_*SPARSITY)
 
 // Generate sparse matrices
-void populate_sparse_matrix(csr_matrix& csr_mat, bool is_uniform){
-
-	int rows = csr_mat.rows;
-	int cols = csr_mat.cols;
-	int nnz = csr_mat.nnz;
-	int nnz_per_row = csr_mat.nnz / csr_mat.rows;
+void populate_sparse_matrix(int rows, int cols, int nnz, float values[NNZ_], int indices[NNZ_], int rowPtr[M_+1], bool is_uniform){
+	int nnz_per_row = nnz / rows;
 
 	assert(nnz_per_row*rows == nnz);
 
 	for (int i = 0; i < rows+1; ++i)
 	{
-		csr_mat.rowPtr[i] = 0;
+		rowPtr[i] = 0;
 	}
-
 
 	bool flags[M_*K_];
 
@@ -155,6 +149,7 @@ void populate_sparse_matrix(csr_matrix& csr_mat, bool is_uniform){
 			}
 		}
 	}
+	
 
 	// Populating indices and rowPtr
 	int nz_id = 0;
@@ -164,8 +159,8 @@ void populate_sparse_matrix(csr_matrix& csr_mat, bool is_uniform){
 		{
 			int flat_id = row*cols + col;
 			if(flags[flat_id] == true){
-				csr_mat.indices[nz_id] = col;
-				csr_mat.rowPtr[row] += 1;
+				indices[nz_id] = col;
+				rowPtr[row] += 1;
 				nz_id += 1;
 			}
 		}
@@ -175,48 +170,31 @@ void populate_sparse_matrix(csr_matrix& csr_mat, bool is_uniform){
 	int sum = 0;
 	for (int row = 0; row <= rows; ++row)
 	{
-		int temp = csr_mat.rowPtr[row];
-		csr_mat.rowPtr[row] = sum;
+		int temp = rowPtr[row];
+		rowPtr[row] = sum;
 		sum += temp;
 	}
 
 	// ALGO 0 : Random initialization
 	for(int i=0; i< nnz; i++){
-		csr_mat.values[i] = rand()%5 + 1;		
+		values[i] = rand()%5 + 1;		
 	}
 }
 
-void populate_dense_matrix(dense_matrix& dense_mat, int ALGO){
-	int rows = dense_mat.rows;
-	int cols = dense_mat.cols;
+void naive_sparse_dense_matmul(int M, int K, int N, 
+	float values[NNZ_], int indices[NNZ_], int rowPtr[M_+1], float B[M_*K_], float C[K_*N_]){
 
-	for(int i=0; i< rows*cols; i++){
-		if(ALGO == -1)
-			dense_mat.values[i] = rand()%5 + 1;
-		else
-			dense_mat.values[i] = 0;
-	}
-}
-
-void naive_sparse_dense_matmul(csr_matrix A_csr, dense_matrix B_mat, dense_matrix C_mat){
-	for (int row = 0; row < A_csr.rows; ++row)
-	for (int col = 0; col < B_mat.cols; ++col)
+	for (int row = 0; row < M; ++row)
+	for (int col = 0; col < N; ++col)
 	{
 		float value = 0;
-		for (int id = A_csr.rowPtr[row]; id < A_csr.rowPtr[row+1]; ++id)
+		for (int id = rowPtr[row]; id < rowPtr[row+1]; ++id)
 		{
-			int col_ind = A_csr.indices[id];
-			float A_val = A_csr.values[id];
-			if(B_mat.is_rowmajor)
-				value += A_val * B_mat.values[col_ind*B_mat.cols + col];
-			else
-				value += A_val * B_mat.values[col*B_mat.rows + col_ind];
+			int col_ind = indices[id];
+			float A_val = values[id];
+			value += A_val * B[col*K + col_ind];
 		}
-
-		if(C_mat.is_rowmajor)
-			C_mat.values[row*C_mat.cols + col] = value;
-		else
-			C_mat.values[col*C_mat.rows + row] = value;
+		C[col*M + row] = value;
 	}
 }
 
@@ -228,6 +206,7 @@ void naive_sparse_dense_matmul(csr_matrix A_csr, dense_matrix B_mat, dense_matri
 int main(int argc, char* argv[]){
 	bool VERBOSE = false;
 	bool is_uniform = false;
+	bool is_rowmajor = false;
 
 	// Memory allocation
 	float values[NNZ_];
@@ -243,6 +222,20 @@ int main(int argc, char* argv[]){
 
 	// Populating into corresponding data structures.
 	if(VERBOSE) std::cout << "Generating A matrix " << std::endl;
+	populate_sparse_matrix(M_, K_, NNZ_, values, indices, rowPtr, is_uniform);
+
+	for (int i = 0; i < M_*K_; ++i)
+	{
+		B[i] = rand() % 5 + 1;
+	}
+
+	for (int i = 0; i < K_*N_; ++i)
+	{
+		C[i] = rand() % 5 + 1;
+	}
+
+	#ifdef FDEBUG
+
 	csr_matrix A_csr;
 	dense_matrix B_dense;
 	dense_matrix C_dense;
@@ -253,43 +246,30 @@ int main(int argc, char* argv[]){
 	A_csr.values = values;
 	A_csr.indices = indices;
 	A_csr.rowPtr = rowPtr;
-	populate_sparse_matrix(A_csr, is_uniform);
-		
-	if(VERBOSE) std::cout << "Generating B matrix " << std::endl;
+
 	B_dense.rows = K_;
 	B_dense.cols = N_;
 	B_dense.values = B;
-	B_dense.is_rowmajor = false;
-	populate_dense_matrix(B_dense, -1);
+	B_dense.is_rowmajor = is_rowmajor;
 
-	if(VERBOSE) std::cout << "Generating C matrix " << std::endl;
 	C_dense.rows = M_;
 	C_dense.cols = N_;
 	C_dense.values = C;
-	C_dense.is_rowmajor = false;
-	populate_dense_matrix(C_dense, 0);
+	C_dense.is_rowmajor = is_rowmajor;
 	
-	#ifdef FDEBUG
-		std::cout << "Matrix A" << std::endl;
-		print_csr_matrix(A_csr);
-		std::cout << "Matrix B" << std::endl;
-		print_dense_matrix(B_dense);
+	std::cout << "Matrix A" << std::endl;
+	print_csr_matrix(A_csr);
+	std::cout << "Matrix B" << std::endl;
+	print_dense_matrix(B_dense);
+
 	#endif
 
-	// Calling the naive kernel
-	auto start = std::chrono::high_resolution_clock::now(); 
-	naive_sparse_dense_matmul(A_csr, B_dense, C_dense);
-	auto stop = std::chrono::high_resolution_clock::now(); 
-
-	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+	naive_sparse_dense_matmul(M_, K_, N_, values, indices, rowPtr, B, C);
 
 	#ifdef FDEBUG
 		std::cout << "Matrix C" << std::endl;
 		print_dense_matrix(C_dense);	
 	#endif
-
-	std::cout << "Time taken by function: "
-     << duration.count() << " microseconds" << std::endl; 
 	
 	return 0;
 }
