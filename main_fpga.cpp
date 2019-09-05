@@ -289,7 +289,10 @@ int main(int argc, char* argv[]){
 
 	#endif
 
-	naive_sparse_dense_matmul(M_, K_, N_, values, indices, rowPtr, B, C);
+    if(!is_uniform)
+	    naive_sparse_dense_matmul(M_, K_, N_, values, indices, rowPtr, B, C);
+    else
+    	naive_usparse_dense_matmul(M_, K_, N_, values, indices, rowPtr, B, C);
 
 	#ifdef FDEBUG
 		std::cout << "Matrix C" << std::endl;
