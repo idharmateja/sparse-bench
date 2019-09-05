@@ -198,6 +198,31 @@ void naive_sparse_dense_matmul(int M, int K, int N,
 	}
 }
 
+void naive_usparse_dense_matmul(int M, int K, int N, 
+	float values[NNZ_], int indices[NNZ_], int rowPtr[M_+1], float B[M_*K_], float C[K_*N_]){
+
+    const int nnz_per_row = NNZ_ / M;
+
+	for (int row = 0; row < M; ++row)
+	for (int col = 0; col < N; ++col)
+	{
+		float value = 0;
+        for (int lid = 0; lid < nnz_per_row ; ++lid)
+		//for (int id = rowPtr[row]; id < rowPtr[row+1]; ++id)
+		{
+            int id = row*nnz_per_row + lid;
+			int col_ind = indices[id];
+			float A_val = values[id];
+			value += A_val * B[col*K + col_ind];
+		}
+		C[col*M + row] = value;
+	}
+}
+
+
+
+
+
 // Note : If program results in seg fault, 
 // then it is probably due to stack overflow.
 // Execute following command to increase stack limit.
