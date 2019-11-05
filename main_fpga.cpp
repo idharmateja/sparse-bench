@@ -238,8 +238,8 @@ int main(int argc, char* argv[]){
 	int indices[NNZ_];
 	int rowPtr[M_+1];
 
-	float B[M_*K_];
-	float C[K_*N_];
+	float B[K_*N_];
+	float C[M_*N_];
 
 	#ifdef FDEBUG
 		srand(time(NULL));
@@ -249,12 +249,12 @@ int main(int argc, char* argv[]){
 	if(VERBOSE) std::cout << "Generating A matrix " << std::endl;
 	populate_sparse_matrix(M_, K_, NNZ_, values, indices, rowPtr, is_uniform);
 
-	for (int i = 0; i < M_*K_; ++i)
+	for (int i = 0; i < K_*N_; ++i)
 	{
 		B[i] = rand() % 5 + 1;
 	}
 
-	for (int i = 0; i < K_*N_; ++i)
+	for (int i = 0; i < M_*N_; ++i)
 	{
 		C[i] = rand() % 5 + 1;
 	}
